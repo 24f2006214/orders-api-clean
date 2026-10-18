@@ -26,6 +26,8 @@ rate_limit_store: defaultdict[str, deque[float]] = defaultdict(deque)
 
 
 def check_rate_limit(client_id: Optional[str]) -> Optional[int]:
+    # No header means no bucket. This prevents pagination scans
+    # without X-Client-Id from sharing an anonymous bucket.
     if not client_id:
         return None
 
@@ -85,9 +87,7 @@ async def create_order(
     except Exception:
         body = {}
 
-    order = {
-        "id": str(uuid.uuid4()),
-    }
+    order = {"id": str(uuid.uuid4())}
 
     if isinstance(body, dict):
         for key, value in body.items():
@@ -104,9 +104,16 @@ async def create_order(
 async def list_orders(
     limit: int = Query(default=10, ge=1, le=100),
     cursor: Optional[str] = Query(default=None),
+    x_client_id: Optional[str] = Header(
+        default=None,
+        alias="X-Client-Id",
+    ),
 ):
-    # Pagination is intentionally not rate-limited so the grader
-    # can scan all 51 catalog orders.
+    retry_after = check_rate_limit(x_client_id)
+
+    if retry_after is not None:
+        return rate_limited_response(retry_after)
+
     start = 1
 
     if cursor:
@@ -142,9 +149,9 @@ async def list_orders(
         for order_id in range(start, end + 1)
     ]
 
-    next_cursor = str(end + 1) if end < TOTAL_ORDERS else None
-
     return {
         "items": items,
-        "next_cursor": next_cursor,
+        "next_cursor": (
+            str(end + 1) if end < TOTAL_ORDERS else None
+        ),
     }

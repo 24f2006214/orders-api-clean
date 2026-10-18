@@ -69,7 +69,11 @@ def create_order(
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     x_client_id: Optional[str] = Header(default=None, alias="X-Client-Id"),
 ):
-    client_id = x_client_id or "anonymous"
+    #client_id = x_client_id or "anonymous"
+    client_id = request.headers.get("X-Client-Id")
+
+    if not client_id:
+        return await call_next(request)
 
     retry_after = check_rate_limit(client_id)
     if retry_after is not None:
